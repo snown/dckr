@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+
+COMPOSE_FILE="/opt/docker-compose.yml"
+
+if [[ -f "/etc/default/dckr/dckr.conf" ]]; then
+  . /etc/default/dckr/dckr.conf
+elif [[ -f "/etc/defaults/dckr/dckr.conf" ]]; then
+  source /etc/defaults/dckr/dckr.conf
+elif [[ -f "~/.dckr.conf" ]]; then
+  source "~/.dckr.conf"
+fi
+
+function perform_update {
+  docker-compose -f "${COMPOSE_FILE}" pull --parallel "$@"
+  docker-compose -f "${COMPOSE_FILE}" up -d
+}
+
+function attach_logs {
+  docker-compose -f "${COMPOSE_FILE}" logs -tf "$@"
+}
+
+function attach_shell {
+  docker exec -it "$@" /bin/bash
+}
+
+function main {
+  local positionals
+  local action
+  local image
+  
+  positionals=()
+  while [[ $# -gt 0 ]]; do
+    _key="$1"
+    case "${_key}" in
+    -f|--file)
+      COMPOSE_FILE="$2"
+      shift
+      ;;
+    update)
+      action=update
+      ;;
+    edit)
+      "${EDITOR}" "${COMPOSE_FILE}"
+      exit 0
+      ;;
+    logs|log)
+      action=logs
+      ;;
+    attach|shell|bash)
+      action=attach
+      # TODO: Verify second argument, and that it is a service
+      image="$2"
+      shift
+      ;;
+    *)
+      positionals+=( "${_key}" )
+      ;;
+    esac
+    shift
+  done
+
+  if [[ ! -f "${COMPOSE_FILE}" ]]; then
+    echo "No compose file. Specify in defaults file or with -f flag."
+    exit 1
+  fi
+  
+  if [[ ! -z ${action:+x} ]]; then
+    case "${action}" in
+    update)
+      perform_update "${positionals[@]}"
+      ;;
+    logs)
+      attach_logs "${positionals[@]}"
+      ;;
+    attach)
+      attach_shell "${image}"
+      ;;
+    esac
+    exit 0
+  fi
+  
+  docker-compose -f "${COMPOSE_FILE}" "${positionals[@]}"
+}
+
+main "$@"

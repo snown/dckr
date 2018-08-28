@@ -1,0 +1,135 @@
+function parse_yaml {
+   local prefix=$2
+   local s='[[:space:]]*' w='[a-zA-Z0-9_]*' fs=$(echo @|tr @ '\034')
+   sed -ne "s|^\($s\):|\1|" \
+        -e "s|^\($s\)\($w\)$s:$s[\"']\(.*\)[\"']$s\$|\1$fs\2$fs\3|p" \
+        -e "s|^\($s\)\($w\)$s:$s\(.*\)$s\$|\1$fs\2$fs\3|p"  $1 |
+   awk -F$fs '{
+      indent = length($1)/2;
+      vname[indent] = $2;
+      for (i in vname) {if (i > indent) {delete vname[i]}}
+      if (length($3) > 0) {
+         vn=""; for (i=0; i<indent; i++) {vn=(vn)(vname[i])("::")}
+         printf("%s%s%s=\"%s\"\n", "'$prefix'",vn, $2, $3);
+      }
+   }'
+}
+
+__services () {
+  local _services
+
+  if [[ ! -z ${COMPOSE_FILE:+x} ]]; then
+    IFS=$'\n' read -d '' -ra _services <<< "$( parse_yaml "${COMPOSE_FILE}" | sed -n -E 's/^services::(.*?)::.*$/\1/p' | uniq )"
+    
+    local "${1:-services}" && _upvar "${1:-services}" "${_services[@]}"
+  fi
+}
+
+__docker_compose () {
+  if [[ -r "/etc/bash_completion.d/docker-compose" ]]; then
+    . "/etc/bash_completion.d/docker-compose" && _docker_compose
+  elif [[ -r "/usr/share/bash-completion/completions/docker-compose" ]]; then
+    . "/usr/share/bash-completion/completions/docker-compose" && _docker_compose
+  fi
+}
+
+_dckr_dckr () {
+  case "${prev}" in
+  -f|--file)
+    _filedir "y?(a)ml"
+    return
+    ;;
+  esac
+  
+  case "${cur}" in
+  -*)
+    COMPREPLY=( $(compgen -W "--file" -- "$cur") )
+    ;;
+  *)
+    __docker_compose
+    COMPREPLY=( $(compgen -W "edit logs shell update" -- "$cur") "${COMPREPLY[@]}" )
+    ;;
+  esac
+}
+
+_dckr_edit () {
+  COMPREPLY=()
+}
+
+_dckr_logs () {
+  case "${prev}" in
+  --tail)
+    return
+    ;;
+  esac
+  
+  case "${cur}" in
+  -*)
+    COMPREPLY=( $(compgen -W "--tail" -- "${cur}") )
+    ;;
+  *)
+    __services
+    COMPREPLY=( $(compgen -W "${services[*]}" -- "$cur") )
+  esac
+}
+
+_dckr_shell () {
+  __services
+  COMPREPLY=( $(compgen -W "${services[*]}" -- "$cur") )
+}
+
+_dckr_update () {
+  __services
+  COMPREPLY=( $(compgen -W "${services[*]}" -- "$cur") )
+}
+
+_dckr () {
+  COMPREPLY=()
+  local cur prev words=() cword cmd='dckr' cmd_pos=0
+  _init_completion
+  
+  COMPOSE_FILE="/opt/docker-compose.yml"
+
+  if [[ -r "/etc/default/dckr/dckr.conf" ]]; then
+    . /etc/default/dckr/dckr.conf
+  elif [[ -r "/etc/defaults/dckr/dckr.conf" ]]; then
+    . /etc/defaults/dckr/dckr.conf
+  elif [[ -r "~/.dckr.conf" ]]; then
+    . "~/.dckr.conf"
+  fi
+  
+  for (( i = 1; i < "$cword"; i++ )); do
+    case "${words[$i]}" in
+    -f|--file)
+      COMPOSE_FILE="${words[${i}+1]}"
+      ((i++))
+      ;;
+    -*)
+      ;;
+    *)
+      case "${words[$i]}" in
+      log)
+        cmd="logs"
+        ;;
+      attach|bash)
+        cmd="shell"
+        ;;
+      *)
+        cmd="${words[$i]}"
+        ;;
+      esac
+      
+      cmd_pos=$i
+      break
+      ;;
+    esac
+  done
+  
+  if $(typeset -F "_dckr_${cmd}" >/dev/null); then
+    "_dckr_${cmd}"
+  else
+    __docker_compose
+  fi
+}
+
+complete -F _dckr dckr
