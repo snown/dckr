@@ -15,6 +15,34 @@ function parse_yaml {
    }'
 }
 
+function find_completion {
+  local bash_completion_paths=()
+  if [[ -z ${BASH_COMPLETION_PATH:-x} ]]; then
+    bash_completion_paths=(
+        "\${HOME}/.local/etc/bash_completion.d"
+        "\${HOME}/.local/share/bash_completion/completions"
+        "\${HOME}/.etc/bash_completion.d"
+        "\${HOME}/.share/bash_completion/completions"
+        "/usr/local/etc/bash_completion.d"
+        "/usr/local/share/bash_completion/completions"
+        "/etc/bash_completion.d"
+        "/usr/share/bash_completion/completions"
+        )
+  else
+    IFS=: read -ra bash_completion_paths <<< "${BASH_COMPLETION_PATH}"
+  fi
+  
+  local completion_file
+  for completion_dir in "${bash_completion_paths[@]}"; do
+    if [[ -f "${completion_dir}/$1" && -r "${completion_dir}/$1" ]]; then
+      completion_file="${completion_dir}/$1"
+      break
+    fi
+  done
+  
+  echo "${completion_file}"
+}
+
 __services () {
   local _services
 
@@ -26,10 +54,9 @@ __services () {
 }
 
 __docker_compose () {
-  if [[ -r "/etc/bash_completion.d/docker-compose" ]]; then
-    . "/etc/bash_completion.d/docker-compose" && _docker_compose
-  elif [[ -r "/usr/share/bash-completion/completions/docker-compose" ]]; then
-    . "/usr/share/bash-completion/completions/docker-compose" && _docker_compose
+  local docker_compose_completion="$(find_completion docker-compose)" 
+  if [[ -n "${docker_compose_completion}" ]]; then
+    . "${docker_compose_completion}"  && _docker_compose
   fi
 }
 
