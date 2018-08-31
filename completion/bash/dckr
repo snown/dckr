@@ -125,7 +125,7 @@ _dckr () {
     . "~/.dckr.conf"
   fi
   
-  for (( i = 1; i < "$cword"; i++ )); do
+  for (( i = 1; i < $cword; i++ )); do
     case "${words[$i]}" in
     -f|--file)
       COMPOSE_FILE="${words[${i}+1]}"
