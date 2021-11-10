@@ -1,40 +1,129 @@
 #!/usr/bin/env bash
 
-COMPOSE_FILE="/opt/docker-compose.yml"
-
 if [[ -f "/etc/default/dckr/dckr.conf" ]]; then
   . /etc/default/dckr/dckr.conf
 elif [[ -f "/etc/defaults/dckr/dckr.conf" ]]; then
   source /etc/defaults/dckr/dckr.conf
-elif [[ -f "~/.dckr.conf" ]]; then
-  source "~/.dckr.conf"
+fi
+if [[ -f "${HOME}/.dckr.conf" ]]; then
+  source "${HOME}/.dckr.conf"
 fi
 
+function select_compose_file {
+  local composeFile="$1"
+  
+  if [[ ! -f "${composeFile}" ]]; then
+    if [[ -f ./"docker-compose.yml" ]]; then
+      composeFile=./"docker-compose.yml"
+    elif [[ -f "${COMPOSE_FILE}" ]]; then
+      composeFile="${COMPOSE_FILE}"
+    elif [[ -f "/opt/docker-compose.yml" ]]; then
+      composeFile="/opt/docker-compose.yml"
+    elif [[ -f "/etc/docker/docker-compose.yml" ]]; then
+      composeFile="/etc/docker/docker-compose.yml"
+    else
+      echo "No compose file. Specify in defaults file or with -f flag."
+      exit 1
+    fi
+  fi
+  
+  printf "%q" "${composeFile}"
+}
+
 function perform_update {
-  docker-compose -f "${COMPOSE_FILE}" pull --parallel "$@"
-  docker-compose -f "${COMPOSE_FILE}" up -d
+  local composeFile
+  local positionals=()
+  
+  while [[ $# -gt 0 ]]; do
+    local _key="$1"
+    case "${_key}" in
+    -f|--file)
+      composeFile="$2"
+      shift
+      ;;
+    *)
+      positionals+=( "${_key}" )
+      ;;
+    esac
+    shift
+  done
+  
+  composeFile="$(select_compose_file "${composeFile}")"
+  
+  docker-compose -f "${composeFile}" pull "${positionals[@]}"
+  docker-compose -f "${composeFile}" up -d
 }
 
 function attach_logs {
-  docker-compose -f "${COMPOSE_FILE}" logs -tf "$@"
+  local composeFile
+  local positionals=()
+  
+  while [[ $# -gt 0 ]]; do
+    local _key="$1"
+    case "${_key}" in
+    -f|--file)
+      composeFile="$2"
+      shift
+      ;;
+    *)
+      positionals+=( "${_key}" )
+      ;;
+    esac
+    shift
+  done
+  
+  composeFile="$(select_compose_file "${composeFile}")"
+  
+  docker-compose -f "${composeFile}" logs -t "${positionals[@]}"
 }
 
 function attach_shell {
-  docker exec -it "$@" /bin/bash
+  local shellPath="sh"
+  local positionals=()
+  
+  while [[ $# -gt 0 ]]; do
+    local _key="$1"
+    case "${_key}" in
+    --shell)
+      shellPath="$2"
+      shift
+      ;;
+    *)
+      positionals+=( "${_key}" )
+      ;;
+    esac
+    shift
+  done
+  
+  docker exec -it "${positionals[@]}" "${shellPath}"
 }
 
 function main {
   local positionals
   local action
   local image
+  local composeFile
+  local shellPath="sh"
   
   positionals=()
   while [[ $# -gt 0 ]]; do
     _key="$1"
     case "${_key}" in
-    -f|--file)
-      COMPOSE_FILE="$2"
+    -f)
+      # But which `-f` IS it?
+      if [[ "${action}" = "logs" && ! -f "$2" ]]; then
+        positionals+=( "--follow" )
+      else
+        # change `-f` to `--file`
+        set -- "${_key}" "--file" "${@:2}"
+      fi
+      ;;
+    --file)
+      composeFile="$2"
       shift
+      ;;
+    --file=*)
+      composeFile="${_key##--file=}"
       ;;
     update)
       action=update
@@ -46,10 +135,28 @@ function main {
     logs|log)
       action=logs
       ;;
-    attach|shell|bash)
+    attach|shell|bash|ash|zsh)
       action=attach
+      
+      case "${_key}" in
+      bash)
+        shellPath="/bin/bash"
+        ;;
+      ash)
+        shellPath="/bin/ash"
+        ;;
+      zsh)
+        shellPath="/bin/zsh"
+        ;;
+      esac
+      
       # TODO: Verify second argument, and that it is a service
       image="$2"
+      
+      shift
+      ;;
+    --shell)
+      shellPath="$2"
       shift
       ;;
     *)
@@ -59,27 +166,24 @@ function main {
     shift
   done
 
-  if [[ ! -f "${COMPOSE_FILE}" ]]; then
-    echo "No compose file. Specify in defaults file or with -f flag."
-    exit 1
-  fi
+  composeFile="$(select_compose_file "${composeFile}")"
   
   if [[ ! -z ${action:+x} ]]; then
     case "${action}" in
     update)
-      perform_update "${positionals[@]}"
+      perform_update -f "${composeFile}" "${positionals[@]}"
       ;;
     logs)
-      attach_logs "${positionals[@]}"
+      attach_logs -f "${composeFile}" "${positionals[@]}"
       ;;
     attach)
-      attach_shell "${image}"
+      attach_shell --shell "${shellPath}" "${image}"
       ;;
     esac
     exit 0
   fi
   
-  docker-compose -f "${COMPOSE_FILE}" "${positionals[@]}"
+  docker-compose -f "${composeFile}" "${positionals[@]}"
 }
 
 main "$@"
